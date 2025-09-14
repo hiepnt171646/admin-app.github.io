@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Survey Admin Dashboard</title>
+<style>
+  body { margin:0; font-family: Arial,sans-serif; background:#f8fafc; color:#1e293b; }
+  .sidebar { position:fixed; left:0; top:0; width:280px; height:100vh; background:#1e293b; color:white; padding:0; box-shadow:2px 0 10px rgba(0,0,0,0.1); display:none; }
+  .sidebar-header { padding:30px 25px; border-bottom:1px solid #334155; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+  .sidebar-header h2 { margin:0; font-size:1.5rem; display:flex; align-items:center; gap:10px; }
+  .sidebar-header p { font-size:0.9rem; opacity:0.8; margin:5px 0 0 0; }
+  .sidebar nav { padding:20px 0; }
+  .nav-item { padding:15px 25px; border-left:4px solid transparent; display:flex; align-items:center; gap:12px; cursor:pointer; transition: all 0.3s ease; }
+  .nav-item:hover { background: rgba(102, 126, 234, 0.1); }
+  .nav-item.active { border-left:4px solid #667eea; background: rgba(102, 126, 234, 0.1); }
+  .main { margin-left:280px; padding:30px; display:none; }
+  .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:40px; padding:20px 30px; background:white; border-radius:15px; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
+  .header h1 { margin:0; font-size:2.5rem; }
+  .stats { display:flex; gap:20px; }
+  .stat-card { padding:15px 20px; background:#f1f5f9; border-radius:10px; text-align:center; min-width:120px; }
+  .stat-card span { display:block; font-size:2rem; font-weight:bold; color:#667eea; }
+  .stat-card div { font-size:0.9rem; color:#64748b; margin-top:5px; }
+  .section { margin-bottom:40px; }
+  .section-header { display:flex; align-items:center; gap:15px; margin-bottom:25px; }
+  .section-title { font-size:1.8rem; font-weight:bold; margin:0; }
+  .chart-container { background:white; border-radius:20px; padding:30px; box-shadow:0 4px 20px rgba(0,0,0,0.08); border:1px solid #e2e8f0; max-width:900px; margin-bottom:40px; }
+  .question-chart { margin-bottom:30px; }
+  .question-chart h3 { font-size:1.3rem; font-weight:600; color:#334155; margin-bottom:15px; }
+  .footer { text-align:center; padding:30px; color:#64748b; font-size:0.9rem; border-top:1px solid #e2e8f0; margin-top:50px; }
+  .loading { display:flex; flex-direction:column; align-items:center; justify-content:center; height:50vh; gap:20px; }
+  .spinner { width:60px; height:60px; border:4px solid #f3f4f6; border-top:4px solid #667eea; border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin { 0%{transform:rotate(0deg);}100%{transform:rotate(360deg);} }
+  #loginDiv { display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; }
+  #loginDiv button { padding:15px 30px; font-size:1.2rem; border:none; border-radius:50px; cursor:pointer; background:linear-gradient(135deg,#43e97b,#38f9d7); color:white; }
+  #userInfo { margin-top:15px; font-size:1rem; }
+</style>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDKSZ90zsIYiHeahFdbL0M5HK4lzIvsBU4",
+    authDomain: "quiz-97ec7.firebaseapp.com",
+    projectId: "quiz-97ec7",
+    storageBucket: "quiz-97ec7.appspot.com",
+    messagingSenderId: "233024726562",
+    appId: "1:233024726562:web:26e86b04d2481451588c7b"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+  const provider = new GoogleAuthProvider();
+
+  const loginBtn = document.getElementById("loginBtn");
+  const loginDiv = document.getElementById("loginDiv");
+  const mainDiv = document.querySelector(".main");
+  const sidebar = document.querySelector(".sidebar");
+  const userInfo = document.getElementById("userInfo");
+
+  loginBtn.onclick = async () => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      console.log("Logged in user:", user);
+    } catch(err) {
+      console.error(err);
+      alert("Login failed");
+    }
+  };
+
+  onAuthStateChanged(auth, user => {
+    if(user){
+      loginDiv.style.display="none";
+      mainDiv.style.display="block";
+      sidebar.style.display="block";
+      userInfo.innerHTML = `Xin chào, ${user.displayName} <button onclick="logout()">Logout</button>`;
+      fetchDashboardData();
+    }else{
+      loginDiv.style.display="flex";
+      mainDiv.style.display="none";
+      sidebar.style.display="none";
+    }
+  });
+
+  window.logout = async () => {
+    await signOut(auth);
+  };
+
+  // Dashboard logic
+  async function fetchDashboardData(){
+    const totalResultChartCtx = document.getElementById("totalResultChart").getContext("2d");
+    const questionChartsSection = document.getElementById("questionChartsSection");
+    const totalResponsesSpan = document.getElementById("totalResponses");
+    const personalityTypesSpan = document.getElementById("personalityTypes");
+
+    const resultDescriptions = {
+      A: "Bạn là người thích tìm tòi, ham học hỏi và sống nội tâm.",
+      B: "Bạn năng động, thích vận động và giao tiếp xã hội.",
+      C: "Bạn yêu thiên nhiên, ưa khám phá và tự do.",
+      D: "Bạn sáng tạo, lạc quan và thích nghệ thuật."
+    };
+
+    const snapshot = await getDocs(collection(db,"surveyResponses"));
+    const data = snapshot.docs.map(d=>d.data());
+    totalResponsesSpan.innerText = data.length;
+
+    // Tổng hợp kết quả
+    const resultCounts = {};
+    data.forEach(r => { const t=r.result; resultCounts[t]=(resultCounts[t]||0)+1; });
+    personalityTypesSpan.innerText = Object.keys(resultCounts).length;
+
+    // Pie chart tổng
+    new Chart(totalResultChartCtx,{
+      type:'pie',
+      data:{
+        labels:Object.keys(resultCounts).map(k=>resultDescriptions[k]),
+        datasets:[{ data:Object.values(resultCounts), backgroundColor:["#43e97b","#2196f3","#ff9800","#9c27b0"] }]
+      },
+      options:{ responsive:true, plugins:{ legend:{ position:'bottom' } } }
+    });
+
+    // Câu hỏi
+    if(data.length>0){
+      const numQuestions = data[0].answers.length;
+      for(let q=0;q<numQuestions;q++){
+        const qTitle = data[0].answers[q].question;
+        const counts={};
+        data.forEach(r=>{
+          const sel=r.answers[q].selected;
+          counts[sel.text]=(counts[sel.text]||0)+1;
+        });
+        const container = document.createElement("div");
+        container.className="chart-container question-chart";
+        const h3 = document.createElement("h3");
+        h3.innerText=`Câu ${q+1}: ${qTitle}`;
+        const canvas = document.createElement("canvas");
+        container.appendChild(h3);
+        container.appendChild(canvas);
+        questionChartsSection.appendChild(container);
+        new Chart(canvas.getContext("2d"),{
+          type:"bar",
+          data:{ labels:Object.keys(counts), datasets:[{ label:"Số người chọn", data:Object.values(counts), backgroundColor:["#43e97b","#2196f3","#ff9800","#9c27b0"] }]},
+          options:{ responsive:true, scales:{ y:{ beginAtZero:true } } }
+        });
+      }
+    }
+  }
+</script>
+</head>
+<body>
+
+<div id="loginDiv">
+  <button id="loginBtn">Đăng nhập bằng Google</button>
+  <div id="userInfo"></div>
+</div>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>📊 Admin Panel</h2>
+    <p>Survey Analytics Dashboard</p>
+  </div>
+  <nav>
+    <div class="nav-item active">📈 Dashboard</div>
+    <div class="nav-item">📋 Responses</div>
+    <div class="nav-item">⚙️ Settings</div>
+    <div class="nav-item">📊 Reports</div>
+  </nav>
+</div>
+
+<div class="main">
+  <div class="header">
+    <h1>Dashboard</h1>
+    <div class="stats">
+      <div class="stat-card">
+        <span id="totalResponses">0</span>
+        <div>Tổng phản hồi</div>
+      </div>
+      <div class="stat-card">
+        <span id="personalityTypes">0</span>
+        <div>Loại tính cách</div>
+      </div>
+      <div class="stat-card">
+        <span id="completionRate">94%</span>
+        <div>Tỷ lệ hoàn thành</div>
+      </div>
+      <div class="stat-card">
+        <span id="avgResponseTime">2.5 phút</span>
+        <div>Thời gian TB</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <h2 class="section-title">Phân bố loại tính cách</h2>
+    </div>
+    <div class="chart-container">
+      <canvas id="totalResultChart"></canvas>
+    </div>
+  </div>
+
+  <div class="section" id="questionChartsSection">
+    <div class="section-header">
+      <h2 class="section-title">Phân tích từng câu hỏi</h2>
+    </div>
+  </div>
+
+  <div class="footer">© 2024 Survey Analytics Dashboard • Powered by HTML/JS & Firebase</div>
+</div>
+
+</body>
+</html>
